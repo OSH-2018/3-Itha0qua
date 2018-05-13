@@ -30,9 +30,9 @@ static size_t alc(size_t num)
 	  if(!mem[i])
 	  {
 	    *tail=i;
-	    *ocp+=1;
 	    mem[i]=mmap(NULL,blocksize,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
             *(size_t*)mem[i]=NONE;//use the first size_t space of the block to store
+	    *ocp++;
 	    return i;
 	  }  
   return -1;
@@ -40,6 +40,7 @@ static size_t alc(size_t num)
 static struct filenode *get_filenode(const char *name)
 {
     struct filenode *node = root;
+    if(!root) return NULL;
     while(node) {
         if(strcmp(node->filename, name + 1) != 0)
             node = node->next;
@@ -79,7 +80,6 @@ static void *oshfs_init(struct fuse_conn_info *conn)
 
 static int oshfs_getattr(const char *path, struct stat *stbuf)
 {
-    int ret = 0;
     struct filenode *node = get_filenode(path);
     if(strcmp(path, "/") == 0)
     { 
@@ -127,29 +127,31 @@ static int oshfs_mknod(const char *path, mode_t mode, dev_t dev)
 
 static int oshfs_open(const char *path, struct fuse_file_info *fi)
 {
-
+    printf("open successfully\n");
     if (get_filenode(path)==NULL)
 	return -errno;
     return 0;
 }
 
-static int oshfs_write(const char *path,const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
+
+static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs, struct fuse_file_info *fi)
 {
+    //printf("start write!\n");
     struct filenode *node = get_filenode(path);
     if (node == NULL) return -1;
-    if(offset>node->st.st_size+1) return -ENOENT;//when offset is too large
-    node->st.st_size = offset + size;
+    if(ofs>node->st.st_size) return -ENOENT;//when offset is too large
+    node->st.st_size = ofs + size;
     node->st.st_mtime = time(NULL);
     node->st.st_atime = time(NULL);
     if(node->content==NONE)
     {
        node->content = alc(*tail);
        if(node->content==NONE)return -ENOSPC;
-    }//first write
-
+    }
     size_t c=node->content;
     void *sta;
-    size_t ofs=offset,rec;
+    size_t rec=-1;
+    //printf("2\n");
     while(ofs>ava)
     {
       if(c==NONE) return -ENOSPC;
@@ -161,19 +163,19 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t offs
     {
       c=alc(*tail);
       if(c==NONE) return -ENOSPC;
-      *(size_t *)mem[rec]=c;
+      if(rec!=-1) *(size_t *)mem[rec]=c;
     }
-     size_t total = (offset+size)/ava; 
+     size_t total = (ofs+size)/ava; 
      node->st.st_blocks += total;
-     if(total > (blocknr - *ocp)) return -ENOSPC;
+    // if(total > (blocknr - *ocp)) return -ENOSPC;
     sta=mem[c]+ofs+sizeof(size_t);
- 
+    char *tem=(char *)buf;  
     if((ava-ofs)>size)
     {
-      memcpy(sta,buf,size );
+      memcpy(sta,tem,size );
       return size;
     }
-    char* tem=(char *)buf;
+    //printf("3\n");
     size_t lf=size-ava+ofs;
     memcpy(sta,tem, ava-ofs);
     tem+=ava-ofs;
@@ -189,12 +191,13 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t offs
     rec=c;
     c=alc(*tail);
     *(size_t *) mem[rec]=c;
-    memcpy(mem[c]+sizeof(size_t),tem,lf);//the last block 		 
+    memcpy(mem[c]+sizeof(size_t),tem,lf);//the last block 	
     return size;
 }
 
 static int oshfs_truncate(const char *path, off_t size)
 {
+    printf("start truncate!\n");
     struct filenode *node = get_filenode(path);
     if(size > node->st.st_size) return 0;//can not make file larger
     node->st.st_blocks = (size+ava-1) / ava; 
@@ -210,13 +213,12 @@ static int oshfs_truncate(const char *path, off_t size)
     }	
     rec=c;
     c = *(size_t*) mem[c];
-    *(size_t *) mem[rec]=NONE;
-    while(*(size_t *) mem[c]!=NONE)
+    while(c!=NONE)
     {
       rec=*(size_t *)mem[c];
       munmap(mem[c],blocksize);
       mem[c]=NULL;
-      ocp-=1;
+      //*ocp-=1;
       c=rec;
     }
     return 0; 
@@ -224,6 +226,7 @@ static int oshfs_truncate(const char *path, off_t size)
 
 static int oshfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
+    printf("start read!\n");
     struct filenode *node = get_filenode(path);
     int ret = size;
     if(offset>node->st.st_size) return 0; 
@@ -262,6 +265,7 @@ static int oshfs_read(const char *path, char *buf, size_t size, off_t offset, st
 
 static int oshfs_unlink(const char *path)
 {
+    printf("start unlink!\n");
     struct filenode *node = root;
     struct filenode *parent=NULL;
     if(strcmp(root->filename,path+1)!=0)
@@ -278,6 +282,7 @@ static int oshfs_unlink(const char *path)
         else
             break;
     }
+    printf("1\n");
     if(node==NULL)
     return -ENOENT;    
     if(parent==NULL)
@@ -285,14 +290,20 @@ static int oshfs_unlink(const char *path)
     else
     parent->next=node->next;
     size_t c=node->content,rec;
+    rec=*(size_t *) mem[c];
+    printf("2 c=%ld c->next=%ld \n",c,rec);
     while(c!=NONE)
     {
       rec=*(size_t *) mem[c];
       munmap(mem[c],blocksize);
-      *ocp-=1;
+      printf("loop\n");
+      //*ocp-=1;
       mem[c] = NULL;
       c=rec;
+      printf("c->next=%ld\n",c);
     }
+
+    printf("3\n");
     return 0;
 }
 

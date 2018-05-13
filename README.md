@@ -1,2 +1,2 @@
-# 3-Itha0qua
-3-Itha0qua created by GitHub Classroom
+# 大概完成了...
+主页上给的基本命令都测试无误，除了大文件写入太慢。另外还加了一些元数据修改功能。

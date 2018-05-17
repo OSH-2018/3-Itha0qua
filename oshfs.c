@@ -8,78 +8,136 @@
 #include <stdio.h>
 #define MAX_NAME_LENGTH 256
 #define NONE -1
+#define UNUSED -2
 
 struct filenode {
     char filename[MAX_NAME_LENGTH];
-    size_t size;
     size_t content;
     struct stat st;
     struct filenode *next;
 };
-static const size_t blocksize=4096;  //4kb
-static const size_t blocknr=262144; //total size = 1GB
-static struct filenode *root = NULL;
-static void *mem[262145];
-static size_t *tail,*ocp;//the tailer of blocks, and the number of ocupied blocks
-static size_t ava=4096-sizeof(size_t); //the size actually available
+static const size_t block_size=8192;  //8kb
+static const size_t blocknr=131072; //total size = 1GB
+static void *mem[131072];
+static const size_t head=131072*sizeof(size_t)/8192;
+static const size_t head_size=8192/sizeof(size_t);
+size_t tail=131072;
+size_t tail_used=0;
+struct filenode **root;
 
-static size_t alc(size_t num)
+static size_t alc()
 {
-  if(num>blocknr) return -1;
-  for(size_t i=num;i<blocknr;i++)
-	  if(!mem[i])
-	  {
-	    *tail=i;
-	    mem[i]=mmap(NULL,blocksize,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
-            *(size_t*)mem[i]=NONE;//use the first size_t space of the block to store
-	    *ocp++;
-	    return i;
-	  }  
+  size_t *a;
+  for(size_t i=0;i<head;i++)
+  {
+     a=(size_t *) mem[i];
+    for(size_t j=0;j<head_size;j++)
+    {
+      if(a[j]==UNUSED)
+      {
+	a[j]=NONE;
+        return head_size*i+j;
+      }
+    }
+  }    
   return -1;
 }
 static struct filenode *get_filenode(const char *name)
 {
-    struct filenode *node = root;
-    if(!root) return NULL;
+    printf("start get filenode!\n");
+    struct filenode *node = *root;
+    printf("root=%p\n",*root);
+    if(!*root) return NULL;
     while(node) {
         if(strcmp(node->filename, name + 1) != 0)
             node = node->next;
         else
             return node;
+	printf("node=%p\n",node);
     }
     return NULL;
 }
 
+static struct filenode *alc_node()
+{
+  struct filenode *node;
+  if(sizeof(struct filenode)+tail_used<block_size)
+  {
+     node = (struct filenode*) (mem[tail]+tail_used);
+     tail_used+=sizeof(struct filenode);
+  }
+  else
+  {
+    ((size_t *)mem[tail/head_size])[tail%head_size]=tail-1;
+    tail--;
+    if(((size_t *)mem[tail/head_size])[tail%head_size]!=UNUSED)
+	    return NULL;
+    else ((size_t *)mem[tail/head_size])[tail%head_size]=NONE;
+    node = (struct filenode*) mem[tail];
+    tail_used=sizeof(struct filenode);
+  }
+  node->next=NULL;
+  return (struct filenode*) node;
+}
 
 static void create_filenode(const char *filename, const struct stat *st)
 {
-    size_t num=alc(*tail);
+    printf("start create!\n");
+    size_t num=alc();
+    printf("num=%ld\n",num);
     if(num==-1) return;
-    struct filenode *new=(struct filenode *)mem[num];	
-    if(sizeof(filename)>MAX_NAME_LENGTH)
+    struct filenode *new=alc_node();	
+    if(strlen(filename)>MAX_NAME_LENGTH)
     memcpy(new->filename, filename,MAX_NAME_LENGTH+1);
-    else memcpy(new->filename, filename,sizeof(filename)+1);
+    else memcpy(new->filename, filename,strlen(filename)+1);
+    printf("length of name=%ld\n",strlen(filename));
     memcpy(&new->st, st, sizeof(struct stat));
-    new->next = root;
-    new->size=num;
+    new->next = *root;
     new->content = NONE;
-    root = new;
+    *root = new;
 }
 
 static void *oshfs_init(struct fuse_conn_info *conn)
 {
+   printf("start init!\n");
    memset(mem,0,sizeof(void *) * blocknr);
-   root=NULL;
-   mem[0]= mmap(NULL, blocksize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-   tail =(size_t*) mem[0];
-   ocp = (size_t*)(mem[0]+sizeof(size_t));
-   *tail =0;
-   *ocp=1;
+   size_t *a;
+   size_t t=0,i=0;
+   for(i=0;i<blocknr;i++)
+   {
+    mem[i]= mmap(NULL, block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+   if(i<head)
+   {
+     a=(size_t *) mem[i];
+     for(size_t j=0;j<head_size;j++)
+     if(t<head-1)
+     {
+	     a[j]=i*head_size+j+1;//connections in head
+	     t++;
+     }
+     else if(t==head-1)
+     {
+             a[j]=NONE;//the tail
+	     t++;
+     }
+     else a[j]=UNUSED;//other connections
+   }	   
+   else if(i==blocknr-1)
+   {
+     tail=i;
+     tail_used=sizeof(struct filenode*);
+     root = (struct filenode**) mem[blocknr-1];
+     *root=NULL;
+   }
+   }
+
+   printf("init finish!\nhead=%ld\ntail=%ld\n",head,tail); 
    return NULL; 
 }
 
 static int oshfs_getattr(const char *path, struct stat *stbuf)
 {
+    printf("start getattr!\n");
     struct filenode *node = get_filenode(path);
     if(strcmp(path, "/") == 0)
     { 
@@ -99,7 +157,7 @@ static int oshfs_getattr(const char *path, struct stat *stbuf)
 
 static int oshfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
-    struct filenode *node = root;
+    struct filenode *node = *root;
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
     while(node) {
@@ -111,13 +169,14 @@ static int oshfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, of
 
 static int oshfs_mknod(const char *path, mode_t mode, dev_t dev)
 {
+    printf("start mknod!\n");
     struct stat st;
     st.st_mode = S_IFREG | 0644;
     st.st_uid = fuse_get_context()->uid;
     st.st_gid = fuse_get_context()->gid;
     st.st_nlink = 1;
     st.st_size = 0;
-    st.st_blksize = blocksize;
+    st.st_blksize = block_size;
     st.st_atime = time(NULL);
     st.st_mtime = time(NULL);
     st.st_ctime = time(NULL);
@@ -127,7 +186,7 @@ static int oshfs_mknod(const char *path, mode_t mode, dev_t dev)
 
 static int oshfs_open(const char *path, struct fuse_file_info *fi)
 {
-    printf("open successfully\n");
+    printf("start open!\n");
     if (get_filenode(path)==NULL)
 	return -errno;
     return 0;
@@ -136,62 +195,73 @@ static int oshfs_open(const char *path, struct fuse_file_info *fi)
 
 static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs, struct fuse_file_info *fi)
 {
-    //printf("start write!\n");
+    printf("start write!\n");
     struct filenode *node = get_filenode(path);
     if (node == NULL) return -1;
+    printf("ofs=%ld st_size=%ld\n",ofs,node->st.st_size);
     if(ofs>node->st.st_size) return -ENOENT;//when offset is too large
     node->st.st_size = ofs + size;
     node->st.st_mtime = time(NULL);
     node->st.st_atime = time(NULL);
     if(node->content==NONE)
     {
-       node->content = alc(*tail);
+       node->content = alc();
        if(node->content==NONE)return -ENOSPC;
     }
     size_t c=node->content;
     void *sta;
-    size_t rec=-1;
-    //printf("2\n");
-    while(ofs>ava)
+    size_t rec=NONE;
+    printf("2\n");
+    while(ofs>block_size)
     {
-      if(c==NONE) return -ENOSPC;
+     // printf("c=%ld ofs=%ld\n",c,ofs);
+      if(c==NONE)
+      {
+	  printf("rec=%ld ofs=%ld\n",rec,ofs);
+	  return -ENOSPC;
+      }
       rec=c;
-      c = *(size_t*) mem[c];
-      ofs-=ava;
+      c = ((size_t *)mem[c/head_size])[c%head_size];
+      ofs-=block_size;
     }//forward  to find where to start
+    printf("3 c=%ld rec=%ld ofs=%ld\n",c,rec,ofs);
     if(c==NONE)
     {
-      c=alc(*tail);
+      c=alc();
       if(c==NONE) return -ENOSPC;
-      if(rec!=-1) *(size_t *)mem[rec]=c;
+      if(rec!=-1) ((size_t *)mem[rec/head_size])[rec%head_size]=c;
     }
-     size_t total = (ofs+size)/ava; 
-     node->st.st_blocks += total;
-    // if(total > (blocknr - *ocp)) return -ENOSPC;
-    sta=mem[c]+ofs+sizeof(size_t);
+     size_t total =  (ofs+size-1)/block_size+1; 
+     node->st.st_blocks = total;
+    sta=mem[c]+ofs;
     char *tem=(char *)buf;  
-    if((ava-ofs)>size)
+    if((block_size-ofs)>size)
     {
       memcpy(sta,tem,size );
       return size;
     }
-    //printf("3\n");
-    size_t lf=size-ava+ofs;
-    memcpy(sta,tem, ava-ofs);
-    tem+=ava-ofs;
-    while(lf>ava)
+    printf("4\n");
+    size_t lf=size-block_size+ofs;
+    memcpy(sta,tem, block_size-ofs);
+    tem+=block_size-ofs;
+    while(lf>block_size)
     {
        rec=c;
-       c=alc(*tail);
-       *(size_t *) mem[rec]=c;
-       memcpy(mem[c]+sizeof(size_t),tem,ava);
-       lf-=ava;
-       tem+=ava;
+       c=alc();
+       ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+       memcpy(mem[c],tem,block_size);
+       lf-=block_size;
+       tem+=block_size;
+       if(rec==c)
+       {
+         printf("error!/n");
+	 return -ENOSPC;
+       }
     }//whole  blocks
     rec=c;
-    c=alc(*tail);
-    *(size_t *) mem[rec]=c;
-    memcpy(mem[c]+sizeof(size_t),tem,lf);//the last block 	
+    c=alc();
+    ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+    memcpy(mem[c],tem,lf);//the last block 	
     return size;
 }
 
@@ -199,28 +269,36 @@ static int oshfs_truncate(const char *path, off_t size)
 {
     printf("start truncate!\n");
     struct filenode *node = get_filenode(path);
-    if(size > node->st.st_size) return 0;//can not make file larger
-    node->st.st_blocks = (size+ava-1) / ava; 
+    node->st.st_blocks = (size-1) / block_size+1; 
     node->st.st_size = size;
     size_t c = node->content;
+    if(c==NONE) {c=alc(); node->content=c;}
     size_t ofs=size,rec;
-    while(ofs>ava)
+    while(ofs>block_size)
     {
-        if(c==NONE) return 0;
+        if(c==NONE) 
+	{
+	  c=alc();
+	  ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+	}
         rec=c;
-        c = *(size_t*) mem[c];
-        ofs-=ava;
+        c=((size_t *)mem[c/head_size])[c%head_size];
+	ofs-=block_size;
+	//printf("1 c=%ld rec=%ld\n",c,rec);
     }	
     rec=c;
-    c = *(size_t*) mem[c];
-    while(c!=NONE)
+    if(c!=NONE)
+           c=((size_t *)mem[c/head_size])[c%head_size];
+     printf("2 c=%ld\n",c);
+    while(c!=NONE&&c!=UNUSED)
     {
-      rec=*(size_t *)mem[c];
-      munmap(mem[c],blocksize);
+      rec=((size_t *)mem[c/head_size])[c%head_size];
+      munmap(mem[c],block_size);
       mem[c]=NULL;
-      //*ocp-=1;
       c=rec;
+      printf("c=%ld\n",c);
     }
+    printf("3\n");
     return 0; 
 }
 
@@ -235,42 +313,43 @@ static int oshfs_read(const char *path, char *buf, size_t size, off_t offset, st
     size_t c=node->content;
     void *sta;
     size_t ofs=offset,rec;
-    while(ofs>ava)
+    while(ofs>block_size)
     {
       if(c==NONE) return 0;
       rec=c;
-      c = *(size_t*) mem[c];
-      ofs-=ava;
+      c=((size_t *)mem[c/head_size])[c%head_size];
+      ofs-=block_size;
     }//forward  to find where to start
-    sta=mem[c]+ofs+sizeof(size_t);
-    if(ava-ofs>ret)
+    sta=mem[c]+ofs;
+    if(block_size-ofs>ret)
     {
       memcpy(buf,sta, ret);
       return ret;
     }
     char* tem=buf;
-    memcpy(tem, sta, ava-ofs);
-    tem+=ava-ofs;
-    size_t lf=ret-ava+ofs;
-    while(lf>ava)
+    memcpy(tem, sta, block_size-ofs);
+    tem+=block_size-ofs;
+    size_t lf=ret-block_size+ofs;
+    while(lf>block_size)
     {
-       c=*(size_t *) mem[c];
-       memcpy(tem,mem[c]+sizeof(size_t),ava);
-       lf-=ava;
-       tem+=ava;
+       c=((size_t *)mem[c/head_size])[c%head_size];
+       memcpy(tem,mem[c],block_size);
+       lf-=block_size;
+       tem+=block_size;
     }
-    memcpy(tem,mem[*(size_t *) mem[c]]+sizeof(size_t) , lf);
+    memcpy(tem,mem[((size_t *)mem[c/head_size])[c%head_size]] , lf);
     return ret;
 }
 
 static int oshfs_unlink(const char *path)
 {
     printf("start unlink!\n");
-    struct filenode *node = root;
+    struct filenode *node = *root;
     struct filenode *parent=NULL;
-    if(strcmp(root->filename,path+1)!=0)
+    printf("root->filename=%s\n",(*root)->filename);
+    if(strcmp((*root)->filename,path+1)==0)
     { 
-	 node=root;
+	 node=*root;
          parent=NULL;
     }
     else while(node) {
@@ -286,18 +365,17 @@ static int oshfs_unlink(const char *path)
     if(node==NULL)
     return -ENOENT;    
     if(parent==NULL)
-    root=root->next;
+    *root=(*root)->next;
     else
     parent->next=node->next;
     size_t c=node->content,rec;
-    rec=*(size_t *) mem[c];
-    printf("2 c=%ld c->next=%ld \n",c,rec);
+    munmap(node,sizeof(struct filenode));
+    printf("2 c=%ld\n root=%p\n",c,*root);
     while(c!=NONE)
     {
-      rec=*(size_t *) mem[c];
-      munmap(mem[c],blocksize);
+      rec=((size_t *)mem[c/head_size])[c%head_size];
+      munmap(mem[c],block_size);
       printf("loop\n");
-      //*ocp-=1;
       mem[c] = NULL;
       c=rec;
       printf("c->next=%ld\n",c);

@@ -49,11 +49,13 @@ static struct filenode *get_filenode(const char *name)
     printf("root=%p\n",*root);
     if(!*root) return NULL;
     while(node) {
+	//printf("size=%ld content=%ld\n",node->st.st_size,node->content);
+	
         if(strcmp(node->filename, name + 1) != 0)
             node = node->next;
         else
             return node;
-	printf("node=%p\n",node);
+	//printf("node=%p\n",node);
     }
     return NULL;
 }
@@ -117,7 +119,7 @@ static void *oshfs_init(struct fuse_conn_info *conn)
      }
      else if(t==head-1)
      {
-             a[j]=NONE;//the tail
+             a[j]=NONE;//the end of head
 	     t++;
      }
      else a[j]=UNUSED;//other connections
@@ -199,7 +201,8 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
     struct filenode *node = get_filenode(path);
     if (node == NULL) return -1;
     printf("ofs=%ld st_size=%ld\n",ofs,node->st.st_size);
-    if(ofs>node->st.st_size) return -ENOENT;//when offset is too large
+    if(ofs>node->st.st_size) return -ENOENT;
+    if(node->st.st_size<ofs+size)
     node->st.st_size = ofs + size;
     node->st.st_mtime = time(NULL);
     node->st.st_atime = time(NULL);
@@ -222,6 +225,11 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
       }
       rec=c;
       c = ((size_t *)mem[c/head_size])[c%head_size];
+      if(c==NONE)
+      {
+        c=alc();
+	 ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+      }
       ofs-=block_size;
     }//forward  to find where to start
     printf("3 c=%ld rec=%ld ofs=%ld\n",c,rec,ofs);
@@ -246,9 +254,17 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
     tem+=block_size-ofs;
     while(lf>block_size)
     {
+       if(((size_t *)mem[c/head_size])[c%head_size]==NONE)
+       {
        rec=c;
        c=alc();
        ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+       }
+       else
+       {
+       rec=c; 
+       c=((size_t *)mem[rec/head_size])[rec%head_size];
+       }
        memcpy(mem[c],tem,block_size);
        lf-=block_size;
        tem+=block_size;
@@ -259,9 +275,14 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
        }
     }//whole  blocks
     rec=c;
+    if(((size_t *)mem[rec/head_size])[rec%head_size]==NONE)
+    {
     c=alc();
     ((size_t *)mem[rec/head_size])[rec%head_size]=c;
+    }
+    else c=((size_t *)mem[rec/head_size])[rec%head_size];
     memcpy(mem[c],tem,lf);//the last block 	
+    printf("5 end in %ld/n",c);
     return size;
 }
 
@@ -270,6 +291,7 @@ static int oshfs_truncate(const char *path, off_t size)
     printf("start truncate!\n");
     struct filenode *node = get_filenode(path);
     node->st.st_blocks = (size-1) / block_size+1; 
+    printf("size:%ld->%ld\n",node->st.st_size,size);
     node->st.st_size = size;
     size_t c = node->content;
     if(c==NONE) {c=alc(); node->content=c;}
@@ -296,9 +318,8 @@ static int oshfs_truncate(const char *path, off_t size)
       munmap(mem[c],block_size);
       mem[c]=NULL;
       c=rec;
-      printf("c=%ld\n",c);
     }
-    printf("3\n");
+    printf("3 c=%ld\n",c);
     return 0; 
 }
 

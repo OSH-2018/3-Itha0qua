@@ -274,6 +274,7 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
 	 return -ENOSPC;
        }
     }//whole  blocks
+    printf("4.5\n");
     rec=c;
     if(((size_t *)mem[rec/head_size])[rec%head_size]==NONE)
     {
@@ -281,6 +282,7 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
     ((size_t *)mem[rec/head_size])[rec%head_size]=c;
     }
     else c=((size_t *)mem[rec/head_size])[rec%head_size];
+    printf("4.7 c=%ld\n",c);
     memcpy(mem[c],tem,lf);//the last block 	
     printf("5 end in %ld/n",c);
     return size;
@@ -310,8 +312,11 @@ static int oshfs_truncate(const char *path, off_t size)
     }	
     rec=c;
     if(c!=NONE)
+    {
            c=((size_t *)mem[c/head_size])[c%head_size];
-     printf("2 c=%ld\n",c);
+           ((size_t *)mem[rec/head_size])[rec%head_size]=NONE;
+    } 
+    printf("2 c=%ld\n",c);
     while(c!=NONE&&c!=UNUSED)
     {
       rec=((size_t *)mem[c/head_size])[c%head_size];

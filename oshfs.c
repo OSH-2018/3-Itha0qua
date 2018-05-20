@@ -324,6 +324,7 @@ static int oshfs_truncate(const char *path, off_t size)
       rec=((size_t *)mem[c/head_size])[c%head_size];
       munmap(mem[c],block_size);
       mem[c]=NULL;
+      ((size_t *)mem[c/head_size])[c%head_size]=UNUSED;
       c=rec;
     }
     printf("3 c=%ld\n",c);
@@ -403,6 +404,7 @@ static int oshfs_unlink(const char *path)
     {
       rec=((size_t *)mem[c/head_size])[c%head_size];
       munmap(mem[c],block_size);
+      ((size_t *)mem[c/head_size])[c%head_size]=UNUSED;
       printf("loop\n");
       mem[c] = NULL;
       c=rec;

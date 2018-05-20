@@ -1,5 +1,7 @@
 #OSH——LAB03
-测试代码：
+测试结果：
+
+>
 root@ubuntu:/lib/modules/4.13.0-38-generic/kernel# cd  mountpoint
 root@ubuntu:/lib/modules/4.13.0-38-generic/kernel/mountpoint# ls -al
 总用量 4

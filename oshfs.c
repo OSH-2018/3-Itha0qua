@@ -47,39 +47,45 @@ static struct filenode *get_filenode(const char *name)
 {
     printf("start get filenode!\n");
     struct filenode *node = *root;
-    printf("root=%p\n",*root);
+    printf("root->name=%s\n",(*root)->filename);
     if(!*root) return NULL;
     while(node) {
-	//printf("size=%ld content=%ld\n",node->st.st_size,node->content);
+	printf("size=%ld content=%ld\n",node->st.st_size,node->content);
 	
         if(strcmp(node->filename, name + 1) != 0)
             node = node->next;
         else
             return node;
-	//printf("node=%p\n",node);
+	printf("node=%p\n",node);
     }
     return NULL;
 }
 
 static struct filenode *alc_node()
 {
+  printf("start allocate node!\n");
   struct filenode *node;
   if(sizeof(struct filenode)+tail_used<block_size)
   {
+     printf("2 case 1\n");
      node = (struct filenode*) (mem[tail]+tail_used);
      tail_used+=sizeof(struct filenode);
   }
   else
   {
+    printf("2 case 2\n");
     ((size_t *)mem[tail/head_size])[tail%head_size]=tail-1;
     tail--;
     if(((size_t *)mem[tail/head_size])[tail%head_size]!=UNUSED)
 	    return NULL;
     else ((size_t *)mem[tail/head_size])[tail%head_size]=NONE;
+   mem[tail]=mmap(NULL, block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     node = (struct filenode*) mem[tail];
     tail_used=sizeof(struct filenode);
   }
+  printf("3 tail_used=%ld block_size=%ld node=%p\n",tail_used,block_size,node);
   node->next=NULL;
+  printf("4\n");
   return (struct filenode*) node;
 }
 
@@ -89,10 +95,11 @@ static void create_filenode(const char *filename, const struct stat *st)
     size_t num=alc();
     printf("num=%ld\n",num);
     if(num==-1) return;
-    struct filenode *new=alc_node();	
+    struct filenode *new=alc_node();
+    printf("allocate node success!\n");    
     if(strlen(filename)>MAX_NAME_LENGTH)
-    memcpy(new->filename, filename,MAX_NAME_LENGTH+1);
-    else memcpy(new->filename, filename,strlen(filename)+1);
+    memcpy(new->filename, filename,MAX_NAME_LENGTH);
+    else memcpy(new->filename, filename,strlen(filename));
     printf("length of name=%ld\n",strlen(filename));
     memcpy(&new->st, st, sizeof(struct stat));
     new->next = *root;
@@ -286,7 +293,7 @@ static int oshfs_write(const char *path,const char *buf, size_t size, off_t ofs,
     else c=((size_t *)mem[rec/head_size])[rec%head_size];
     printf("4.7 c=%ld\n",c);
     memcpy(mem[c],tem,lf);//the last block 	
-    printf("5 end in %ld/n",c);
+    printf("5 end in %ld\n",c);
     return size;
 }
 

@@ -1,5 +1,24 @@
-# OSH——LAB03  
-测试结果：
+# OSH——LAB03  
+## 映射方法  
+
+块大小4K，块个数131072，这两个为给定参数，共计1G（虚拟机性能较差，所以取的小了一些）  
+前head个数的块储存块之间的关系（head由131072\*sizeof(size_t)8192计算得出），使用size_t整型储存:  
+* UNUSED=-2 表示块未被使用，此时块并没有被分配内存
+* NONE=-1 表示块被占用，但它并不指向任何块
+* i（i>=0）表示块指向第i块
+
+从最后一块开始记录节点信息，其中mem[blocknr-1]记录根节点\*root（占一个指针的位置），然后逐渐加入（struct filenode）节点类型来储存文件信息
+节点包含：
+* char filename[MAX_NAME_LENGTH];
+* size_t content;
+* struct stat st;
+* struct filenode *next;
+
+所有节点构成一个以\*root为根节点的链表，每次查询文件遍历链表即可
+若记录节点信息的块被占满，则向前申请一块新块，若前一块被占用则报出内存不足的错误（为了稳定性，也可按照普通申请块方式申请一个内存块）
+
+
+## 测试结果
 
 ```
 root@ubuntu:/lib/modules/4.13.0-38-generic/kernel# cd mountpoint

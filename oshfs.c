@@ -36,6 +36,7 @@ static size_t alc()
       if(a[j]==UNUSED)
       {
 	a[j]=NONE;
+	mem[head_size*i+j]=mmap(NULL, block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         return head_size*i+j;
       }
     }
@@ -107,6 +108,7 @@ static void *oshfs_init(struct fuse_conn_info *conn)
    size_t t=0,i=0;
    for(i=0;i<blocknr;i++)
    {
+    if(i<head||i==blocknr-1)
     mem[i]= mmap(NULL, block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
    if(i<head)
    {

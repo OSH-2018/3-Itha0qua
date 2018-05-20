@@ -27,6 +27,10 @@ root@ubuntu:/lib/modules/4.13.0-38-generic/kernel/mountpoint# dd if=/dev/zero of
 记录了20+0 的读入
 记录了20+0 的写出
 20971520 bytes (21 MB, 20 MiB) copied, 1.04408 s, 20.1 MB/s
+root@ubuntu:/lib/modules/4.13.0-38-generic/kernel/mountpoint# dd if=/dev/zero of=testfile bs=1M count=200
+记录了200+0 的读入
+记录了200+0 的写出
+209715200 bytes (210 MB, 200 MiB) copied, 36.0039 s, 5.8 MB/s
 root@ubuntu:/lib/modules/4.13.0-38-generic/kernel/mountpoint# ls -al
 总用量 5
 drwxr-xr-x  0 root root        0 Jan  1  1970 .

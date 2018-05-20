@@ -43,6 +43,7 @@ static size_t alc()
   }    
   return -1;
 }
+
 static struct filenode *get_filenode(const char *name)
 {
     printf("start get filenode!\n");
@@ -60,6 +61,18 @@ static struct filenode *get_filenode(const char *name)
     }
     return NULL;
 }
+
+static int oshfs_rename(const char *name, const char *new)
+{
+    struct filenode* node = get_filenode(name);
+    if(node==NULL)
+        return -ENOENT;
+    if(strlen(new)<=MAX_NAME_LENGTH)
+        memcpy(node->filename,new+1,strlen(new));
+    else memcpy(node->filename,new+1,MAX_NAME_LENGTH);
+    return 0;
+}
+
 
 static struct filenode *alc_node()
 {
@@ -454,6 +467,7 @@ static const struct fuse_operations op = {
     .chown = oshfs_chown,
     .chmod = oshfs_chmod,
     .utimens = oshfs_utimens,
+    .rename = oshfs_rename
 };
 
 int main(int argc, char *argv[])
